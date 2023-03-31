@@ -1,91 +1,91 @@
-# CDK lambda development template
+# Rust-based WebAssembly (wasm) module as a Lambda Layer
 
-This is a CDK template to develop lambda functions in your isolated environment
+This repo showcases how we can call wasm from Lambda layer
 
 # Why we need this?
 
-When you are building a lambda function using CDK in a team, your functions get overriden by other developers functions when they deploy. By having isolated CDK environment which imports external resources (e.g. DynamoDB, S3), we can safely develop our lambda functions. Once you confirmed that your function is working properly in your environment, you can copy your code to your base CDK project.
+- By using Rust-based WebAssembly (wasm), we can access its power while keeping the functions accessible from TypeScript.
+- Additionally, we can avoid including the wasm files in Lambda, which reduces the size and makes it reusable.
 
-<p align="center">
-<img src="https://user-images.githubusercontent.com/6277118/179318780-e5110421-f945-40fa-acdc-514b3945d32c.png" width=800px />
-</p>
+# Prerequisite
+
+install `wasm-pack` to build wasm file from rust
+
+```
+cargo install wasm-pack
+```
 
 # How to use
 
-1. Set your development Stack name
+1. Set your development Stack account
 
 - create .env file and add your setup
 
 ```
-YOUR_NAME=tomo
+ACCOUNT_NAME=xxx
 ```
 
-- When you deploy your CDK, it will be named as `DevStack${yourname}`
+2. Build wasm
 
-2. Add your external resources & lambda function
+- Compile wasm from Rust. In this example, we build `wasm-add` module into wasm file.
 
 ```
-export class DevelopmentTemplateStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
-    super(scope, id, props);
-    // Reference your resouces
-    // See how to reference external resources https://docs.aws.amazon.com/cdk/v2/guide/resources.html
-
-    const s3Bucket = s3.Bucket.fromBucketArn(this, 'MyBucket', 'arn:aws:s3:::my-bucket-name');
-
-    // Set your lambda
-    cont yourLambda = new lambda_nodejs.NodejsFunction(this, "yourlambda", {
-      runtime: lambda.Runtime.NODEJS_16_X,
-      handler: "handler",
-      entry: path.join(`${__dirname}/../`, "functions", "yourlambda/index.ts"),
-      environment: {
-        BUCKET: props.s3Bucket.bucketName,
-      },
-    });
-
-    props.s3Bucket.grantReadWrite(yourLambda);
-
-  }
-}
+make build_wasm moduleName=wasm-add
 ```
 
-3. Your lambda
+3. Install files
 
-- This project uses yarn 2+ workspace.
-- Add your function under `functions` (e.g. `functions/yourlambda/index.ts`)
-- you need to run `yarn install` at the root of the project so that yarn can recognize your function.
-- If you want add other dependencies, call `yarn init` under `functions/yourlambda` then `yarn add {dependecies you want to add}`
+This will link local dependencies as well
+
+```
+yarn install
+```
 
 4. Deploy
 
-```
-yarn cdk:deploy
-```
-
-# Tips
-
-### Accessing lambda layer
-
-You can use submodules to access the lambda layer
+- Then call deploy
 
 ```
-git submodule add git@github.com:yourproject/main-cdk.git main-cdk
+yarn cdk:deploy --profile={your profile}
 ```
 
-Then add the path in `tsconfig.json`
+# Accessing Lambda layer
 
-```
-{
-  ...
-      "paths": {
-      "/opt/nodejs/s3": ["main-cdk/functions/layers/awsservice/nodejs/s3"]
-    }
-}
-```
+- CDK's `NodejsFunction` uses esbuild under the hood, hence all js files in Lambda layer will be bundled into one `index.js` file
+- This approach does not work with wasm since internally a wasm-js tries to access wasm in the same directory which is `/var/task` on Lambda.
 
-and when you update submodule
+```wasm-add.js
+const path = require('path').join(__dirname, 'wasm_add_bg.wasm'); // path is `/var/task/wasm_add_bg.wasm`
+const bytes = require('fs').readFileSync(path); // The file doesn't exist!
 
-```
-git submodule update --recursive --remote --merge
+const wasmModule = new WebAssembly.Module(bytes);
 ```
 
+- In order to call wasm from our Lambda, we deploy our wasm Lambda layer under `opt/nodejs/node_modules` (`NODE_PATH`)
+- To do so, we copy all files under `layer/wasm-add/nodejs/node_modules` after `wasm-pack build`
+  - This has another benefit; We don't have to add `/opt/xxx` in `tsconfig`'s `paths` because `layer/wasm-add` is accessible as a workspace from Lambda functions
+- When we deploy, path should be `layers/{moduleName}` so that the same directory structure will be kept on `Lambda layer`
+
+```
+this.layer = new Lambda.LayerVersion(this, "Layer", {
+  code: Lambda.Code.fromAsset(
+    path.join(`${__dirname}/..`, "layers/wasm-add"),
+  ),
+  compatibleRuntimes: [Lambda.Runtime.NODEJS_16_X],
+  description: "A layer with wasm",
+});
+```
+
+- The Lambda function access `wasm-add` like this
+
+```
+import { add } from "wasm-add"; // we don't use `/opt/nodejs/wasm-add`!
+
+export const handler = {...};
+```
+
+# Reference
+
+- A tutorial for Rust wasm https://developer.mozilla.org/en-US/docs/WebAssembly/Rust_to_wasm#rust_and_webassembly_use_cases
+- Rust wasm https://rustwasm.github.io/wasm-bindgen/examples/add.html
+- Great explanation about not including the code from Lambda Layer in Lambda function https://www.shawntorsitano.com/2022/06/19/creating-lambda-layers-with-typescript-and-cdk-the-right-way/
