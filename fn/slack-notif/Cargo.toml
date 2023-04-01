@@ -1,0 +1,14 @@
+[package]
+name = "slack-notif"
+version = "0.1.0"
+edition = "2021"
+authors = ["tomo<tomoima525@gmail.com>"]
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+reqwest = "0.11.16"
+wasm-bindgen = "0.2.84"
+wasm-bindgen-futures = "0.4.34"
