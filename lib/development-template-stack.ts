@@ -28,5 +28,24 @@ export class DevelopmentTemplateStack extends Stack {
         ],
       },
     });
+
+    new lambda_nodejs.NodejsFunction(this, "Slack Notification", {
+      description: "Send slack notification",
+      runtime: lambda.Runtime.NODEJS_16_X,
+      handler: "handler",
+      entry: path.join(`${__dirname}/../`, "functions", "slack/index.ts"),
+      layers: [layerStack.slackLayer],
+      environment: {
+        SLACK_WEBHOOK_URL:
+          // "https://hooks.slack.com/services/xxx/yyy/zzz",
+          "Set your own webhook url",
+      },
+      bundling: {
+        externalModules: [
+          "aws-sdk", // Use the 'aws-sdk' available in the Lambda runtime
+          "slack-notif",
+        ],
+      },
+    });
   }
 }
